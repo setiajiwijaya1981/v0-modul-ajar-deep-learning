@@ -1,31 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { verifyAuthToken } from '@/lib/jwt';
 
 export async function middleware(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
 
-  // Public routes
-  const publicRoutes = ['/', '/auth/login', '/auth/register', '/catalog'];
-  if (publicRoutes.includes(pathname) || pathname.startsWith('/catalog/')) {
+  // Public routes - no auth required
+  const publicRoutes = ['/', '/auth/login', '/auth/register', '/auth/forgot-password', '/catalog'];
+  if (publicRoutes.includes(pathname) || pathname.startsWith('/catalog/') || pathname.startsWith('/auth/')) {
     return NextResponse.next();
   }
 
-  // Protected routes
-  if (pathname.startsWith('/dashboard') || pathname.startsWith('/admin') || pathname.startsWith('/api/')) {
-    const token = request.cookies.get('auth_session')?.value;
-
-    if (!token) {
+  // Protected routes - check for Firebase auth session
+  if (pathname.startsWith('/dashboard') || pathname.startsWith('/admin') || pathname.startsWith('/api/modules')) {
+    const authSessionCookie = request.cookies.get('__session')?.value;
+    
+    // If no auth session, redirect to login
+    if (!authSessionCookie) {
       return NextResponse.redirect(new URL('/auth/login', request.url));
-    }
-
-    const payload = await verifyAuthToken(token);
-    if (!payload) {
-      return NextResponse.redirect(new URL('/auth/login', request.url));
-    }
-
-    // Admin routes check
-    if (pathname.startsWith('/admin') && payload.role !== 'admin' && payload.role !== 'school_admin') {
-      return NextResponse.redirect(new URL('/dashboard', request.url));
     }
   }
 
@@ -33,5 +23,5 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/((?!_next|.*\\..*).*)'],
+  matcher: ['/((?!_next|.*\\..*|public).*)'],
 };
