@@ -1,0 +1,429 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ==================== AUTHENTICATION & USER MANAGEMENT ====================
+
+model User {
+  id        String     @id @default(cuid())
+  email     String     @unique
+  name      String?
+  password  String     // hashed password
+  role      UserRole   @default(USER)
+  school    School?    @relation(fields: [schoolId], references: [id])
+  schoolId  String?
+  
+  // Relations
+  createdModules  Module[]
+  moduleReviews   ModuleReview[]
+  loginHistory    LoginHistory[]
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([email])
+  @@index([schoolId])
+}
+
+enum UserRole {
+  ADMIN           // Platform admin
+  SCHOOL_ADMIN    // School administrator
+  TEACHER         // Teacher/Guru
+  MODERATOR       // Content moderator
+  USER            // Regular user
+}
+
+model LoginHistory {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  ipAddress String?
+  userAgent String?
+  loginAt   DateTime @default(now())
+
+  @@index([userId])
+}
+
+// ==================== SCHOOL & ORGANIZATION ====================
+
+model School {
+  id        String     @id @default(cuid())
+  name      String
+  email     String?    @unique
+  phone     String?
+  address   String?
+  city      String?
+  province  String?
+  
+  users     User[]
+  modules   Module[]
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([name])
+}
+
+// ==================== MASTER DATA: CURRICULUM ====================
+
+model Subject {
+  id        String   @id @default(cuid())
+  code      String   @unique
+  name      String
+  nameEn    String?
+  
+  phases    Phase[]
+  cpTpMaster CPTPMaster[]
+  modules   Module[]
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([code])
+  @@index([name])
+}
+
+model Phase {
+  id        String   @id @default(cuid())
+  code      String   @unique  // e.g., "A", "B", "C", "D", "E", "F"
+  name      String
+  gradeStart Int
+  gradeEnd  Int
+  description String?
+  
+  subject   Subject  @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  subjectId String
+  
+  cpTpMaster CPTPMaster[]
+  modules    Module[]
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([subjectId, code])
+  @@index([subjectId])
+}
+
+model CPTPMaster {
+  id        String   @id @default(cuid())
+  
+  subject   Subject  @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  subjectId String
+  
+  phase     Phase    @relation(fields: [phaseId], references: [id], onDelete: Cascade)
+  phaseId   String
+  
+  // Capaian Pembelajaran (CP)
+  cpCode    String
+  cpText    String   @db.Text
+  
+  // Tujuan Pembelajaran (TP)
+  tpCode    String
+  tpText    String   @db.Text
+  
+  // Profil Pelajar Pancasila dimensions (JSON flexible content)
+  profileDimensions String? @db.Text // JSON array
+  
+  // Grade level for granular filtering
+  gradeLevel Int?
+  
+  // Assessment elements
+  assessmentElements String? @db.Text // JSON array
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([subjectId, phaseId, cpCode, tpCode])
+  @@index([subjectId])
+  @@index([phaseId])
+  @@index([cpCode])
+  @@index([tpCode])
+}
+
+// ==================== MODULE MANAGEMENT ====================
+
+model Module {
+  id        String   @id @default(cuid())
+  title     String
+  slug      String   @unique
+  description String? @db.Text
+  
+  // Metadata
+  subject   Subject  @relation(fields: [subjectId], references: [id])
+  subjectId String
+  
+  phase     Phase    @relation(fields: [phaseId], references: [id])
+  phaseId   String
+  
+  grade     Int
+  schoolYear String? // e.g., "2023/2024"
+  
+  // Module content (18 components structure)
+  content   ModuleContent @relation("ModuleToContent", fields: [contentId], references: [id])
+  contentId String   @unique
+  
+  // Curriculum alignment
+  cpTpReferences String? @db.Text // JSON array of CP/TP codes
+  
+  // Author & ownership
+  author    User     @relation(fields: [authorId], references: [id])
+  authorId  String
+  
+  school    School?  @relation(fields: [schoolId], references: [id], onDelete: SetNull)
+  schoolId  String?
+  
+  // Status & workflow
+  status    ModuleStatus @default(DRAFT)
+  visibility ModuleVisibility @default(PRIVATE)
+  
+  // Review process
+  reviews   ModuleReview[]
+  
+  // Publishing & versioning
+  isPublished Boolean @default(false)
+  publishedAt DateTime?
+  version   Int     @default(1)
+  
+  // Documents & attachments
+  documents ModuleDocument[]
+  
+  // Tracking
+  viewCount Int     @default(0)
+  downloadCount Int @default(0)
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  deletedAt DateTime?
+
+  @@index([slug])
+  @@index([subjectId])
+  @@index([phaseId])
+  @@index([grade])
+  @@index([authorId])
+  @@index([status])
+  @@index([visibility])
+  @@fulltext([title, description])
+}
+
+enum ModuleStatus {
+  DRAFT          // Being created
+  REVIEW         // Awaiting review
+  APPROVED       // Approved by moderator
+  PUBLISHED      // Available to all
+  ARCHIVED       // No longer in use
+}
+
+enum ModuleVisibility {
+  PRIVATE        // Only author
+  SCHOOL         // School users only
+  PUBLIC         // All authenticated users
+}
+
+// ==================== MODULE CONTENT (18 Components) ====================
+
+model ModuleContent {
+  id        String   @id @default(cuid())
+  
+  // Component 1: Module Metadata
+  pesertaDidikIdentifikasi String? @db.Text // JSON
+  
+  // Component 2: Learning Materials
+  materiPembelajaran String? @db.Text
+  relevansiKehidupanNyata String? @db.Text
+  strukturMateri String? @db.Text
+  
+  // Component 3: Curriculum Alignment
+  dimensiProfilPelajar String? @db.Text // JSON
+  
+  // Component 4: Learning Objectives
+  capaianPembelajaran String? @db.Text
+  elemenCapaian String? @db.Text
+  tujuanPembelajaran String? @db.Text
+  
+  // Component 5: Interdisciplinary
+  lintasDisiplinIlmu String? @db.Text // JSON
+  
+  // Component 6: Topics
+  topikUtama String?
+  subTopik String? @db.Text // JSON array
+  pertanyaanPemantik String? @db.Text // JSON array
+  
+  // Component 7: Pedagogical Practices
+  pendekatanPembelajaran String? @db.Text // JSON
+  modelPembelajaran String? @db.Text // JSON
+  metodePembelajaran String? @db.Text // JSON
+  mediaSourceBelajar String? @db.Text // JSON
+  
+  // Component 8: Learning Steps
+  langkahPembelajaran String? @db.Text // JSON detailed structure
+  
+  // Component 9: Initial Assessment
+  asesmenAwal String? @db.Text
+  
+  // Component 10: Process Assessment
+  asesmenProses String? @db.Text
+  
+  // Component 11: Final Assessment
+  asesmenAkhir String? @db.Text
+  
+  // Component 12: Rubric
+  rubrikPenilaian String? @db.Text
+  
+  // Component 13: Achievement Criteria
+  kriteriaKetercapaian String? @db.Text
+  
+  // Component 14: Remedial & Enrichment
+  remedial String? @db.Text
+  pengayaan String? @db.Text
+  
+  // Component 15: Reflection
+  refleksi String? @db.Text
+  
+  // Component 16: Additional Notes
+  catatanTambahan String? @db.Text
+  
+  // Component 17: References
+  daftarPustaka String? @db.Text // JSON
+  sumberBelajar String? @db.Text // JSON
+  
+  // Component 18: Appendix
+  lampiran String? @db.Text // JSON
+  
+  module    Module   @relation("ModuleToContent", fields: [moduleId], references: [id], onDelete: Cascade)
+  moduleId  String   @unique
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ==================== MODULE DOCUMENTS & ATTACHMENTS ====================
+
+model ModuleDocument {
+  id        String   @id @default(cuid())
+  
+  module    Module   @relation(fields: [moduleId], references: [id], onDelete: Cascade)
+  moduleId  String
+  
+  title     String
+  type      DocumentType
+  url       String   // Vercel Blob URL
+  fileSize  Int      // in bytes
+  mimeType  String?
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([moduleId])
+}
+
+enum DocumentType {
+  PDF
+  WORD
+  POWERPOINT
+  EXCEL
+  IMAGE
+  VIDEO
+  AUDIO
+  OTHER
+}
+
+// ==================== REVIEW & FEEDBACK WORKFLOW ====================
+
+model ModuleReview {
+  id        String   @id @default(cuid())
+  
+  module    Module   @relation(fields: [moduleId], references: [id], onDelete: Cascade)
+  moduleId  String
+  
+  reviewer  User     @relation(fields: [reviewerId], references: [id])
+  reviewerId String
+  
+  status    ReviewStatus @default(PENDING)
+  
+  comments  String?  @db.Text
+  suggestions String? @db.Text
+  
+  rating    Int?     // 1-5 stars
+  
+  checklist String?  @db.Text // JSON - review checklist items
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([moduleId, reviewerId])
+  @@index([moduleId])
+  @@index([reviewerId])
+  @@index([status])
+}
+
+enum ReviewStatus {
+  PENDING     // Waiting for review
+  IN_PROGRESS // Being reviewed
+  APPROVED    // Approved
+  REJECTED    // Needs revision
+  CHANGES_REQUESTED
+}
+
+// ==================== ANALYTICS & TRACKING ====================
+
+model ModuleAccessLog {
+  id        String   @id @default(cuid())
+  
+  moduleId  String
+  userId    String?
+  
+  action    AccessAction
+  
+  ipAddress String?
+  userAgent String?
+  
+  createdAt DateTime @default(now())
+
+  @@index([moduleId])
+  @@index([userId])
+  @@index([createdAt])
+}
+
+enum AccessAction {
+  VIEW
+  DOWNLOAD
+  PRINT
+  SHARE
+  EXPORT
+}
+
+model AnalyticsSnapshot {
+  id        String   @id @default(cuid())
+  
+  date      DateTime
+  
+  // Overview metrics
+  totalModules Int
+  publishedModules Int
+  draftModules Int
+  
+  totalViews Int
+  totalDownloads Int
+  
+  // Subject breakdown
+  subjectStats String? @db.Text // JSON
+  
+  // User statistics
+  totalUsers Int
+  teacherCount Int
+  adminCount Int
+  
+  createdAt DateTime @default(now())
+
+  @@unique([date])
+  @@index([date])
+}
