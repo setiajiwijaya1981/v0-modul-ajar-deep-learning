@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
-import { hashPassword, createAuthToken } from '@/lib/auth';
+import { hashPassword } from '@/lib/password';
+import { createAuthToken } from '@/lib/jwt';
 import { setSessionCookie } from '@/lib/session';
 
 export async function POST(request: NextRequest) {
