@@ -1,45 +1,54 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSession } from '@/lib/session';
-import { prisma } from '@/lib/db';
+import { auth } from '@/lib/firebase';
+import { createModule, getUserModules } from '@/lib/firebase/db';
 
 export async function POST(request: NextRequest) {
   try {
-    const session = await getSession();
-    if (!session) {
+    const authToken = request.headers.get('authorization')?.split('Bearer ')[1];
+    if (!authToken) {
       return NextResponse.json(
         { error: 'Unauthorized' },
         { status: 401 }
       );
     }
 
+    // Verify token
+    const decodedToken = await auth.currentUser;
+    if (!decodedToken) {
+      return NextResponse.json(
+        { error: 'Invalid token' },
+        { status: 401 }
+      );
+    }
+
     const body = await request.json();
-    const { title, subject_id, phase_id, description } = body;
+    const { title, subject, phase, grade, description, theme, duration } = body;
 
     // Validation
-    if (!title || !subject_id || !phase_id) {
+    if (!title || !subject || !phase) {
       return NextResponse.json(
-        { error: 'Title, subject_id, and phase_id are required' },
+        { error: 'Title, subject, and phase are required' },
         { status: 400 }
       );
     }
 
     // Create module
-    const module = await prisma.module.create({
-      data: {
-        title,
-        description,
-        subject_id,
-        phase_id,
-        created_by: session.userId,
-        status: 'draft',
-      },
-      include: {
-        subject: true,
-        phase: true,
-      },
+    const moduleId = await createModule(decodedToken.uid, {
+      title,
+      slug: title.toLowerCase().replace(/\s+/g, '-'),
+      description: description || '',
+      status: 'draft',
+      subject,
+      phase,
+      grade: grade || 0,
+      theme: theme || '',
+      duration: duration || 0,
+      content: {},
+      cpTpReferences: [],
+      tags: [],
     });
 
-    return NextResponse.json(module, { status: 201 });
+    return NextResponse.json({ id: moduleId, message: 'Module created successfully' }, { status: 201 });
   } catch (error) {
     console.error('[v0] Create module error:', error);
     return NextResponse.json(
@@ -51,44 +60,28 @@ export async function POST(request: NextRequest) {
 
 export async function GET(request: NextRequest) {
   try {
-    const session = await getSession();
-    if (!session) {
+    const authToken = request.headers.get('authorization')?.split('Bearer ')[1];
+    if (!authToken) {
       return NextResponse.json(
         { error: 'Unauthorized' },
         { status: 401 }
       );
     }
 
-    const { searchParams } = new URL(request.url);
-    const skip = parseInt(searchParams.get('skip') || '0');
-    const take = parseInt(searchParams.get('take') || '10');
+    // Verify token
+    const decodedToken = await auth.currentUser;
+    if (!decodedToken) {
+      return NextResponse.json(
+        { error: 'Invalid token' },
+        { status: 401 }
+      );
+    }
 
-    const modules = await prisma.module.findMany({
-      where: {
-        created_by: session.userId,
-      },
-      include: {
-        subject: true,
-        phase: true,
-      },
-      orderBy: {
-        created_at: 'desc',
-      },
-      skip,
-      take,
-    });
-
-    const total = await prisma.module.count({
-      where: {
-        created_by: session.userId,
-      },
-    });
+    const modules = await getUserModules(decodedToken.uid);
 
     return NextResponse.json({
       modules,
-      total,
-      skip,
-      take,
+      total: modules.length,
     });
   } catch (error) {
     console.error('[v0] Get modules error:', error);

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -13,57 +14,59 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
-
-interface Module {
-  id: string;
-  title: string;
-  description: string;
-  subject: { name: string };
-  phase: { description: string };
-  status: string;
-  created_at: string;
-  views_count: number;
-}
+import { getCurrentUser } from '@/lib/firebase/auth';
+import { getUserModules } from '@/lib/firebase/db';
+import { Module, MODULE_STATUS } from '@/lib/firebase/db';
+import { Plus, Trash2, FileText } from 'lucide-react';
 
 export default function ModulesPage() {
   const [modules, setModules] = useState<Module[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [filterStatus, setFilterStatus] = useState('all');
+  const [user, setUser] = useState<any>(null);
+  const router = useRouter();
 
   useEffect(() => {
-    const fetchModules = async () => {
+    const loadModules = async () => {
       try {
-        const res = await fetch('/api/modules');
-        if (res.ok) {
-          const data = await res.json();
-          setModules(data.modules);
+        const currentUser = getCurrentUser();
+        if (!currentUser) {
+          router.push('/auth/login');
+          return;
         }
+        
+        setUser(currentUser);
+        console.log('[v0] Loading modules for user:', currentUser.uid);
+        
+        const userModules = await getUserModules(currentUser.uid);
+        setModules(userModules);
       } catch (error) {
-        console.error('[v0] Fetch modules error:', error);
+        console.error('[v0] Error loading modules:', error);
       } finally {
         setLoading(false);
       }
     };
 
-    fetchModules();
-  }, []);
+    loadModules();
+  }, [router]);
 
   const filteredModules = modules.filter((module) => {
     const matchesSearch =
       module.title.toLowerCase().includes(search.toLowerCase()) ||
-      module.description.toLowerCase().includes(search.toLowerCase());
+      module.description?.toLowerCase().includes(search.toLowerCase()) ||
+      module.subject.toLowerCase().includes(search.toLowerCase());
     const matchesStatus = filterStatus === 'all' || module.status === filterStatus;
     return matchesSearch && matchesStatus;
   });
 
   const getStatusBadge = (status: string) => {
     switch (status) {
-      case 'draft':
+      case MODULE_STATUS.DRAFT:
         return <Badge variant="outline">Draft</Badge>;
-      case 'published':
-        return <Badge variant="default">Dipublikasikan</Badge>;
-      case 'archived':
+      case MODULE_STATUS.PUBLISHED:
+        return <Badge className="bg-green-600">Dipublikasikan</Badge>;
+      case MODULE_STATUS.ARCHIVED:
         return <Badge variant="secondary">Diarsipkan</Badge>;
       default:
         return <Badge>{status}</Badge>;
@@ -79,7 +82,10 @@ export default function ModulesPage() {
           <p className="mt-2 text-slate-600">Kelola semua modul ajar yang telah dibuat</p>
         </div>
         <Link href="/dashboard/modules/create">
-          <Button>Buat Modul Baru</Button>
+          <Button>
+            <Plus className="mr-2 h-4 w-4" />
+            Buat Modul Baru
+          </Button>
         </Link>
       </div>
 
@@ -97,9 +103,9 @@ export default function ModulesPage() {
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">Semua Status</SelectItem>
-            <SelectItem value="draft">Draft</SelectItem>
-            <SelectItem value="published">Dipublikasikan</SelectItem>
-            <SelectItem value="archived">Diarsipkan</SelectItem>
+            <SelectItem value={MODULE_STATUS.DRAFT}>Draft</SelectItem>
+            <SelectItem value={MODULE_STATUS.PUBLISHED}>Dipublikasikan</SelectItem>
+            <SelectItem value={MODULE_STATUS.ARCHIVED}>Diarsipkan</SelectItem>
           </SelectContent>
         </Select>
       </div>
@@ -112,7 +118,7 @@ export default function ModulesPage() {
       ) : filteredModules.length === 0 ? (
         <Card>
           <CardContent className="flex flex-col items-center justify-center py-12 text-center">
-            <div className="mb-4 text-4xl">📚</div>
+            <FileText className="mb-4 h-12 w-12 text-slate-300" />
             <h3 className="text-lg font-semibold text-slate-900">Belum ada modul</h3>
             <p className="mt-2 text-slate-600">
               Mulai membuat modul ajar pertama Anda sekarang
@@ -129,21 +135,21 @@ export default function ModulesPage() {
               <Card className="h-full cursor-pointer transition-shadow hover:shadow-md">
                 <CardHeader>
                   <div className="mb-2 flex items-start justify-between">
-                    <CardTitle className="text-lg">{module.title}</CardTitle>
+                    <CardTitle className="line-clamp-2 text-lg">{module.title}</CardTitle>
                     {getStatusBadge(module.status)}
                   </div>
                   <CardDescription className="line-clamp-2">
-                    {module.description}
+                    {module.description || 'Tanpa deskripsi'}
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-3">
                   <div className="flex items-center justify-between text-sm">
-                    <span className="text-slate-600">{module.subject.name}</span>
-                    <span className="text-slate-500">{module.phase.description}</span>
+                    <span className="text-slate-600">{module.subject}</span>
+                    <span className="text-slate-500">Fase {module.phase}</span>
                   </div>
                   <div className="flex items-center justify-between text-xs text-slate-500">
-                    <span>👁 {module.views_count} tampilan</span>
-                    <span>{new Date(module.created_at).toLocaleDateString('id-ID')}</span>
+                    <span>👁 {module.viewCount} tampilan</span>
+                    <span>{new Date(module.createdAt.toDate()).toLocaleDateString('id-ID')}</span>
                   </div>
                 </CardContent>
               </Card>
